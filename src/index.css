@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #0b0f19;
+    color: #f1f5f9;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', sans-serif;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Cinema screen glow */
+.screen-glow {
+  box-shadow: 0 10px 40px -10px rgba(56, 189, 248, 0.45);
+}
+
+.ticket-notch-left {
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 calc(50% + 12px), 12px 50%, 0 calc(50% - 12px));
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.02); }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 4s infinite ease-in-out;
+}
+
+/* Print Styles for Tickets */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  body {
+    background: #0f172a !important;
+    color: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide navigation, footers, backdrop overlays and non-printable elements */
+  header, footer, nav, .backdrop-blur-md, button {
+    display: none !important;
+  }
+
+  /* Make modal container natural during print */
+  .fixed.inset-0 {
+    position: static !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Ensure ticket card is centered and fully visible */
+  #printable-ticket {
+    margin: 0 auto !important;
+    width: 100% !important;
+    max-width: 680px !important;
+    background: #0f172a !important;
+    border: 1px solid #334155 !important;
+    box-shadow: none !important;
+    page-break-inside: avoid !important;
+    display: block !important;
+  }
+}

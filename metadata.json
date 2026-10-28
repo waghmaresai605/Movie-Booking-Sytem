@@ -1,0 +1,8 @@
+{
+  "name": "Remix CineVerse - Movie Ticket Booking System",
+  "description": "Comprehensive movie ticket booking system with interactive seat selection, showtimes, concessions, digital QR boarding tickets, search, and cinema manager dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
