@@ -93,7 +93,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         return;
       }
       if (onLoginSuccess) {
-        onLoginSuccess(userFound);
+        onLoginSuccess({ ...userFound, name: userFound.role === 'admin' ? 'Sai Waghmare' : userFound.name });
         return;
       }
     } else if (trimmed === 'admin@cineverse.com') {
@@ -149,9 +149,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [schedTime, setSchedTime] = useState<string>('07:30 PM');
   const [schedFormat, setSchedFormat] = useState<MovieFormat>('IMAX 3D');
   const [schedHall, setSchedHall] = useState<string>('Hall 1 - Grand IMAX Laser');
-  const [priceVip, setPriceVip] = useState<number>(24.0);
-  const [pricePrime, setPricePrime] = useState<number>(18.5);
-  const [priceClassic, setPriceClassic] = useState<number>(14.0);
+  const [priceVip, setPriceVip] = useState<number>(450.0);
+  const [pricePrime, setPricePrime] = useState<number>(300.0);
+  const [priceClassic, setPriceClassic] = useState<number>(200.0);
   const [preBookedCount, setPreBookedCount] = useState<number>(4);
   const [showScheduleSuccess, setShowScheduleSuccess] = useState('');
 
@@ -1380,30 +1380,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div>
-                      <span className="text-[11px] text-amber-400 font-semibold block mb-1">VIP Recliner ($)</span>
+                      <span className="text-[11px] text-amber-400 font-semibold block mb-1">VIP Recliner (₹)</span>
                       <input
                         type="number"
-                        step="0.5"
+                        step="10"
                         value={priceVip}
                         onChange={(e) => setPriceVip(Number(e.target.value))}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
                       />
                     </div>
                     <div>
-                      <span className="text-[11px] text-sky-400 font-semibold block mb-1">Prime Rows ($)</span>
+                      <span className="text-[11px] text-sky-400 font-semibold block mb-1">Prime Rows (₹)</span>
                       <input
                         type="number"
-                        step="0.5"
+                        step="10"
                         value={pricePrime}
                         onChange={(e) => setPricePrime(Number(e.target.value))}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
                       />
                     </div>
                     <div>
-                      <span className="text-[11px] text-slate-400 font-semibold block mb-1">Classic ($)</span>
+                      <span className="text-[11px] text-slate-400 font-semibold block mb-1">Classic (₹)</span>
                       <input
                         type="number"
-                        step="0.5"
+                        step="10"
                         value={priceClassic}
                         onChange={(e) => setPriceClassic(Number(e.target.value))}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
@@ -1511,10 +1511,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   {s.format}
                                 </span>
                                 <span className="text-[11px] text-amber-400 font-semibold">
-                                  VIP: ${s.prices.vip}
+                                  VIP: {formatCurrency(s.prices.vip)}
                                 </span>
                                 <span className="text-[11px] text-slate-400">
-                                  Classic: ${s.prices.classic}
+                                  Classic: {formatCurrency(s.prices.classic)}
                                 </span>
                               </div>
                             </div>

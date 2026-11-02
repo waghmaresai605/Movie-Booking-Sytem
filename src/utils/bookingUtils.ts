@@ -1,16 +1,16 @@
 import { SeatInfo, Showtime, Movie, Theater, MovieFormat } from '../types';
 
 export const ROWS_CONFIG = [
-  { row: 'A', tier: 'vip' as const, price: 24.0 },
-  { row: 'B', tier: 'vip' as const, price: 24.0 },
-  { row: 'C', tier: 'prime' as const, price: 18.5 },
-  { row: 'D', tier: 'prime' as const, price: 18.5 },
-  { row: 'E', tier: 'prime' as const, price: 18.5 },
-  { row: 'F', tier: 'prime' as const, price: 18.5 },
-  { row: 'G', tier: 'classic' as const, price: 14.0 },
-  { row: 'H', tier: 'classic' as const, price: 14.0 },
-  { row: 'I', tier: 'classic' as const, price: 14.0 },
-  { row: 'J', tier: 'classic' as const, price: 14.0 },
+  { row: 'A', tier: 'vip' as const, price: 450.0 },
+  { row: 'B', tier: 'vip' as const, price: 450.0 },
+  { row: 'C', tier: 'prime' as const, price: 300.0 },
+  { row: 'D', tier: 'prime' as const, price: 300.0 },
+  { row: 'E', tier: 'prime' as const, price: 300.0 },
+  { row: 'F', tier: 'prime' as const, price: 300.0 },
+  { row: 'G', tier: 'classic' as const, price: 200.0 },
+  { row: 'H', tier: 'classic' as const, price: 200.0 },
+  { row: 'I', tier: 'classic' as const, price: 200.0 },
+  { row: 'J', tier: 'classic' as const, price: 200.0 },
 ];
 
 export const TOTAL_COLS = 16;
@@ -118,9 +118,9 @@ export function generateShowtimesForMovie(
         format: slot.format,
         hallName: slot.hall,
         prices: {
-          vip: 24.0,
-          prime: 18.5,
-          classic: 14.0,
+          vip: 450.0,
+          prime: 300.0,
+          classic: 200.0,
         },
         bookedSeats: booked,
       });
@@ -131,8 +131,9 @@ export function generateShowtimesForMovie(
 }
 
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
+  const rounded = Math.round(amount * 100) / 100;
+  if (rounded % 1 === 0) {
+    return `₹${rounded.toLocaleString('en-IN')}`;
+  }
+  return `₹${rounded.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }

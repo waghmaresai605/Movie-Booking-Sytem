@@ -101,9 +101,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       // Fallback fallback seed
       const fallbackUser: User = {
         id: `usr-${role}-${Date.now()}`,
-        name: role === 'admin' ? 'Cinema Director (Admin)' : 'Alex Morgan',
+        name: role === 'admin' ? 'Sai Waghmare' : 'Alex Morgan',
         email: targetEmail,
-        phone: '+1 (555) 234-5678',
+        phone: role === 'admin' ? '+91 98200 11223' : '+91 98765 43210',
         role,
         avatar: selectedAvatar,
         createdAt: new Date().toISOString(),
@@ -145,11 +145,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    const formattedPhone = regPhone.trim() && regPhone.trim() !== '+91'
+      ? (regPhone.trim().startsWith('+91') ? regPhone.trim() : `+91 ${regPhone.trim()}`)
+      : '+91 98765 43210';
+
     const newUser: User & { passwordHash: string } = {
       id: `usr-${Date.now()}`,
       name: regName.trim(),
       email: trimmedEmail,
-      phone: regPhone.trim() || '+1 (555) 000-0000',
+      phone: formattedPhone,
       role: regRole,
       avatar: selectedAvatar,
       createdAt: new Date().toISOString(),
@@ -461,14 +465,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Phone Number
                   </label>
-                  <div className="relative">
-                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <div className="relative flex items-center">
+                    <div className="absolute left-0 inset-y-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-xs font-semibold text-slate-300 flex items-center gap-1 select-none">
+                        <span className="text-sm">🇮🇳</span> +91
+                      </span>
+                      <span className="mx-2 h-3.5 w-px bg-slate-800" />
+                    </div>
                     <input
                       type="tel"
-                      value={regPhone}
-                      onChange={(e) => setRegPhone(e.target.value)}
-                      placeholder="+1 (555) 000-0000"
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 outline-none"
+                      value={regPhone.replace(/^\+91\s*/, '')}
+                      onChange={(e) => {
+                        let val = e.target.value;
+                        if (val.startsWith('+91')) {
+                          val = val.replace(/^\+91\s*/, '');
+                        } else if (val.startsWith('91') && val.length > 10) {
+                          val = val.slice(2);
+                        }
+                        const digitsOnly = val.replace(/[^\d\s-]/g, '');
+                        setRegPhone(`+91 ${digitsOnly}`);
+                      }}
+                      placeholder="98765 43210"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl pl-20 pr-3 py-2 text-xs text-white placeholder-slate-500 outline-none font-medium"
                     />
                   </div>
                 </div>

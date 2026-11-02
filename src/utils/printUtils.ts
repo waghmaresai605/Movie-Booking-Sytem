@@ -1,7 +1,8 @@
+import { jsPDF } from 'jspdf';
 import { Booking } from '../types';
 import { formatCurrency } from './bookingUtils';
 
-export function generateQrSvgString(value: string, size = 130): string {
+export function generateQrMatrix(value: string): boolean[][] {
   const gridSize = 25;
   const matrix: boolean[][] = Array.from({ length: gridSize }, () => Array(gridSize).fill(false));
 
@@ -40,6 +41,12 @@ export function generateQrSvgString(value: string, size = 130): string {
     }
   }
 
+  return matrix;
+}
+
+export function generateQrSvgString(value: string, size = 130): string {
+  const matrix = generateQrMatrix(value);
+  const gridSize = matrix.length;
   const cellSize = size / gridSize;
   let rects = '';
   matrix.forEach((row, r) => {
@@ -306,61 +313,285 @@ export function buildTicketHtml(booking: Booking): string {
 </html>`;
 }
 
-export function printOrSaveTicket(booking: Booking): void {
-  const html = buildTicketHtml(booking);
+/**
+ * Generates a clean, vector-rendered PDF ticket document and saves it directly to the user's computer.
+ */
+export function generateTicketPdf(booking: Booking): jsPDF {
+  // A5 Landscape: 210mm wide x 148mm high - the ideal cinema boarding pass dimensions
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a5',
+  });
 
-  try {
-    // Hidden iframe print method (gold standard for printing clean tickets inside modals/web apps)
-    const existingFrame = document.getElementById('cineverse-print-iframe');
-    if (existingFrame) {
-      existingFrame.remove();
-    }
+  const pageWidth = 210;
+  const pageHeight = 148;
+  const margin = 10;
+  const cardWidth = pageWidth - margin * 2; // 190mm
+  const cardHeight = pageHeight - margin * 2; // 128mm
 
-    const printIframe = document.createElement('iframe');
-    printIframe.id = 'cineverse-print-iframe';
-    printIframe.style.position = 'fixed';
-    printIframe.style.right = '0';
-    printIframe.style.bottom = '0';
-    printIframe.style.width = '0';
-    printIframe.style.height = '0';
-    printIframe.style.border = '0';
-    printIframe.style.zIndex = '-9999';
-    printIframe.style.visibility = 'hidden';
+  // Background of the entire page
+  doc.setFillColor(11, 15, 25); // #0b0f19
+  doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
-    document.body.appendChild(printIframe);
+  // Ticket Container Card
+  doc.setFillColor(15, 23, 42); // #0f172a
+  doc.roundedRect(margin, margin, cardWidth, cardHeight, 6, 6, 'F');
+  doc.setDrawColor(51, 65, 85); // #334155
+  doc.setLineWidth(0.6);
+  doc.roundedRect(margin, margin, cardWidth, cardHeight, 6, 6, 'D');
 
-    const frameDoc = printIframe.contentWindow?.document || printIframe.contentDocument;
-    if (frameDoc && printIframe.contentWindow) {
-      frameDoc.open();
-      frameDoc.write(html);
-      frameDoc.close();
+  // Top Banner / Header Area
+  doc.setFillColor(24, 33, 56); // #182138
+  doc.rect(margin, margin, cardWidth, 28, 'F');
 
-      setTimeout(() => {
-        try {
-          printIframe.contentWindow?.focus();
-          printIframe.contentWindow?.print();
-        } catch (frameErr) {
-          console.warn('Iframe print failed, falling back to window.print()', frameErr);
-          window.print();
-        }
-      }, 350);
+  // Red accent top strip
+  doc.setFillColor(225, 29, 72); // #e11d48
+  doc.rect(margin, margin, cardWidth, 2, 'F');
 
-      // Clean up after print dialog finishes
-      setTimeout(() => {
-        if (printIframe.parentNode) {
-          printIframe.parentNode.removeChild(printIframe);
-        }
-      }, 60000);
-      return;
-    }
-  } catch (err) {
-    console.warn('Direct iframe creation failed, using window.print fallback', err);
+  // Header Brand & Tagline
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(244, 63, 94); // #f43f5e
+  doc.text('CINEVERSE CINEMA BOOKING  •  OFFICIAL DIGITAL PASS', margin + 8, margin + 8);
+
+  // Movie Title
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(255, 255, 255);
+  // Truncate if movie title is too long
+  const movieTitle = booking.movieTitle.length > 38 ? booking.movieTitle.substring(0, 36) + '...' : booking.movieTitle;
+  doc.text(movieTitle, margin + 8, margin + 17);
+
+  // Screening Format Badge (Right side of header)
+  const formatText = booking.format || 'STANDARD 2D';
+  doc.setFillColor(56, 189, 248, 0.15); // sky translucent
+  doc.setDrawColor(56, 189, 248);
+  doc.setLineWidth(0.4);
+  const badgeWidth = doc.getTextWidth(formatText) + 8;
+  const badgeX = margin + cardWidth - badgeWidth - 8;
+  doc.roundedRect(badgeX, margin + 8, badgeWidth, 8, 2, 2, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(56, 189, 248);
+  doc.text(formatText, badgeX + 4, margin + 13.5);
+
+  // Main Info Section: Left side (Details), Right side (QR Code)
+  const leftColX = margin + 8;
+  const colWidth = 62;
+  const startY = margin + 35;
+
+  // Row 1: Theater & Auditorium
+  // Column 1: Theater Name
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184); // #94a3b8
+  doc.text('CINEMA THEATER', leftColX, startY);
+  doc.setFontSize(9.5);
+  doc.setTextColor(255, 255, 255);
+  const theaterName = booking.theaterName.length > 28 ? booking.theaterName.substring(0, 26) + '...' : booking.theaterName;
+  doc.text(theaterName, leftColX, startY + 5);
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  const theaterAddr = booking.theaterAddress.length > 32 ? booking.theaterAddress.substring(0, 30) + '...' : booking.theaterAddress;
+  doc.text(theaterAddr, leftColX, startY + 9);
+
+  // Column 2: Auditorium / Hall
+  const col2X = leftColX + colWidth;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text('AUDITORIUM / HALL', col2X, startY);
+  doc.setFontSize(10);
+  doc.setTextColor(251, 113, 133); // #fb7185
+  doc.text(booking.hallName, col2X, startY + 5);
+
+  // Row 2: Show Date & Reserved Seats
+  const row2Y = startY + 16;
+
+  // Show Date & Time
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text('SHOW DATE & TIME', leftColX, row2Y);
+  doc.setFontSize(9.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text(booking.showDate, leftColX, row2Y + 5);
+  doc.setFontSize(10);
+  doc.setTextColor(251, 191, 36); // #fbbf24
+  doc.text(booking.showTime, leftColX, row2Y + 9.5);
+
+  // Reserved Seats
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text('RESERVED SEATS', col2X, row2Y);
+  doc.setFontSize(12);
+  doc.setTextColor(52, 211, 153); // #34d399 emerald
+  doc.text(booking.seats.join(', '), col2X, row2Y + 6);
+
+  // Divider
+  doc.setDrawColor(30, 41, 59);
+  doc.setLineWidth(0.4);
+  doc.line(leftColX, row2Y + 14, leftColX + 125, row2Y + 14);
+
+  // Row 3: Snacks Ordered (if any)
+  const row3Y = row2Y + 19;
+  if (booking.concessions && booking.concessions.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(148, 163, 184);
+    doc.text('SNACKS & REFRESHMENTS', leftColX, row3Y);
+    doc.setFontSize(8);
+    doc.setTextColor(226, 232, 240);
+    const snacks = booking.concessions.map((c) => `${c.quantity}x ${c.item.name}`).join(' • ');
+    const snacksLine = snacks.length > 60 ? snacks.substring(0, 58) + '...' : snacks;
+    doc.text(snacksLine, leftColX, row3Y + 4);
+  } else {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Audience: ' + (booking.customer?.name || 'Guest') + '  •  Contact: ' + (booking.customer?.email || 'N/A'), leftColX, row3Y + 3);
   }
 
-  // Fallback to standard window.print()
+  // Row 4: Booking Reference & Amount Paid
+  const row4Y = row3Y + 12;
+  doc.setDrawColor(30, 41, 59);
+  doc.line(leftColX, row4Y, leftColX + 125, row4Y);
+
+  // Reference Code
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text('BOOKING REFERENCE', leftColX, row4Y + 6);
+  doc.setFont('courier', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(241, 245, 249);
+  doc.text(booking.bookingCode, leftColX, row4Y + 12);
+
+  // Amount Paid
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text('AMOUNT PAID', col2X, row4Y + 6);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  const pdfAmountPaid = formatCurrency(booking.totalAmount).replace('₹', 'Rs. ').trim();
+  doc.text(pdfAmountPaid, col2X, row4Y + 12);
+
+  // Right Side: Scannable Vector QR Code Container
+  const qrBoxX = margin + 140;
+  const qrBoxY = startY - 2;
+  const qrBoxSize = 42;
+
+  // QR background white card
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(qrBoxX, qrBoxY, qrBoxSize, qrBoxSize, 3, 3, 'F');
+
+  // Draw QR code squares inside the box
+  const qrMatrix = generateQrMatrix(booking.qrValue || booking.bookingCode);
+  const qrPadding = 3.5;
+  const qrInnerSize = qrBoxSize - qrPadding * 2;
+  const cellSize = qrInnerSize / qrMatrix.length;
+
+  doc.setFillColor(15, 23, 42); // #0f172a
+  qrMatrix.forEach((row, r) => {
+    row.forEach((filled, c) => {
+      if (filled) {
+        doc.rect(
+          qrBoxX + qrPadding + c * cellSize,
+          qrBoxY + qrPadding + r * cellSize,
+          cellSize + 0.05,
+          cellSize + 0.05,
+          'F'
+        );
+      }
+    });
+  });
+
+  // QR Code Subtitle
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text('SCAN AT ENTRANCE', qrBoxX + qrBoxSize / 2, qrBoxY + qrBoxSize + 5, { align: 'center' });
+
+  // Status Badge below QR
+  doc.setFillColor(16, 185, 129, 0.15);
+  doc.setDrawColor(16, 185, 129);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(qrBoxX + 4, qrBoxY + qrBoxSize + 8, qrBoxSize - 8, 6, 2, 2, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(52, 211, 153);
+  doc.text('VERIFIED & PAID', qrBoxX + qrBoxSize / 2, qrBoxY + qrBoxSize + 12.2, { align: 'center' });
+
+  // Bottom Security / Admittance Bar
+  const bottomBarY = margin + cardHeight - 11;
+  doc.setFillColor(9, 13, 22);
+  doc.rect(margin, bottomBarY, cardWidth, 11, 'F');
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Non-transferable cinema entry pass • CineVerse Security Code: ' + booking.bookingCode, margin + 8, bottomBarY + 7);
+  doc.text('Valid on date of issue only', margin + cardWidth - 8, bottomBarY + 7, { align: 'right' });
+
+  return doc;
+}
+
+/**
+ * Robust handler called by the "Print / Save PDF Ticket" button:
+ * 1. Generates and immediately downloads the official PDF ticket file (`CineVerse-Ticket-[code].pdf`).
+ * 2. Also handles print dialog fallback cleanly without throwing iframe sandbox errors.
+ */
+export function printOrSaveTicket(booking: Booking): { success: boolean; filename: string } {
+  const filename = `CineVerse-Ticket-${booking.bookingCode || 'pass'}.pdf`;
+
   try {
-    window.print();
-  } catch (err) {
-    console.error('window.print failed:', err);
+    // 1. Generate the PDF
+    const doc = generateTicketPdf(booking);
+
+    // 2. Trigger direct PDF download file
+    // jsPDF's doc.save uses Blob and <a download> under the hood
+    doc.save(filename);
+
+    // 3. Also trigger print if browser environment allows it
+    try {
+      if (typeof window !== 'undefined' && !window.frameElement) {
+        // If not in a strictly restricted subframe, trigger window.print
+        setTimeout(() => {
+          try {
+            window.print();
+          } catch {
+            // Ignore if window.print is blocked by sandbox
+          }
+        }, 600);
+      }
+    } catch {
+      // Safe ignore of frameElement check
+    }
+
+    return { success: true, filename };
+  } catch (error) {
+    console.error('Failed to generate or save PDF ticket via jsPDF:', error);
+
+    // Fallback: create and download HTML ticket blob as emergency download
+    try {
+      const html = buildTicketHtml(booking);
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `CineVerse-Ticket-${booking.bookingCode}.html`;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 2000);
+      return { success: true, filename: `CineVerse-Ticket-${booking.bookingCode}.html` };
+    } catch (fallbackError) {
+      console.error('HTML fallback download failed:', fallbackError);
+      return { success: false, filename };
+    }
   }
 }

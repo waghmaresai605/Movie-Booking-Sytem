@@ -11,6 +11,7 @@ import { DriveProjectModal } from './components/DriveProjectModal';
 import { TheatersView } from './components/TheatersView';
 import { ConcessionsView } from './components/ConcessionsView';
 import { AuthModal } from './components/AuthModal';
+import { MobilePaymentView } from './components/MobilePaymentView';
 import { Footer } from './components/Footer';
 
 import { 
@@ -56,7 +57,15 @@ export default function App() {
   const [users, setUsers] = useState<(User & { passwordHash?: string })[]>(() => {
     try {
       const saved = localStorage.getItem('cineverse_users');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.map((u: User) => {
+          const isAdmin = u.email === 'admin@cineverse.com' || u.role === 'admin';
+          const defaultPhone = isAdmin ? '+91 98200 11223' : '+91 98765 43210';
+          const phone = (!u.phone || u.phone.startsWith('+1')) ? defaultPhone : u.phone;
+          return isAdmin ? { ...u, name: 'Sai Waghmare', phone } : { ...u, phone };
+        });
+      }
     } catch (e) {
       // ignore
     }
@@ -66,7 +75,16 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('cineverse_active_user');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const isAdmin = parsed.email === 'admin@cineverse.com' || parsed.role === 'admin';
+        const defaultPhone = isAdmin ? '+91 98200 11223' : '+91 98765 43210';
+        const phone = (!parsed.phone || parsed.phone.startsWith('+1')) ? defaultPhone : parsed.phone;
+        if (isAdmin) {
+          return { ...parsed, name: 'Sai Waghmare', phone };
+        }
+        return { ...parsed, phone };
+      }
     } catch (e) {
       // ignore
     }
@@ -80,7 +98,18 @@ export default function App() {
   const [showtimes, setShowtimes] = useState<Showtime[]>(() => {
     try {
       const saved = localStorage.getItem('cineverse_showtimes');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: Showtime[] = JSON.parse(saved);
+        return parsed.map((s) => {
+          if (s.prices && s.prices.vip < 100) {
+            return {
+              ...s,
+              prices: { vip: 450.0, prime: 300.0, classic: 200.0 },
+            };
+          }
+          return s;
+        });
+      }
     } catch (e) {
       // ignore
     }
@@ -98,7 +127,7 @@ export default function App() {
             time: dIdx === 0 ? '07:45 PM' : dIdx === 1 ? '04:30 PM' : '01:15 PM',
             format: m.formats[0] || 'IMAX 3D',
             hallName: 'Hall 1 - Grand IMAX Laser',
-            prices: { vip: 24.0, prime: 18.5, classic: 14.0 },
+            prices: { vip: 450.0, prime: 300.0, classic: 200.0 },
             bookedSeats: ['B-7', 'B-8', 'C-8', 'C-9'],
           });
         });
@@ -122,7 +151,26 @@ export default function App() {
   const [bookings, setBookings] = useState<Booking[]>(() => {
     try {
       const saved = localStorage.getItem('cineverse_bookings');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: Booking[] = JSON.parse(saved);
+        return parsed.map((b) => {
+          if (b.id === 'demo-bk-1' && b.totalAmount < 100) {
+            return {
+              ...b,
+              seatDetails: b.seatDetails?.map((s) => ({
+                ...s,
+                price: s.tier === 'vip' ? 450.0 : s.tier === 'prime' ? 300.0 : 200.0,
+              })) || [{ id: 'B-7', tier: 'vip', price: 450.0 }, { id: 'B-8', tier: 'vip', price: 450.0 }],
+              ticketSubtotal: 900.0,
+              concessionsSubtotal: 280.0,
+              convenienceFee: 70.0,
+              discount: 35.0,
+              totalAmount: 1215.0,
+            };
+          }
+          return b;
+        });
+      }
     } catch (e) {
       // ignore
     }
@@ -143,8 +191,8 @@ export default function App() {
       showTime: '07:45 PM',
       seats: ['B-7', 'B-8'],
       seatDetails: [
-        { id: 'B-7', tier: 'vip', price: 24.0 },
-        { id: 'B-8', tier: 'vip', price: 24.0 },
+        { id: 'B-7', tier: 'vip', price: 450.0 },
+        { id: 'B-8', tier: 'vip', price: 450.0 },
       ],
       concessions: [
         {
@@ -152,19 +200,19 @@ export default function App() {
           quantity: 1,
         },
       ],
-      ticketSubtotal: 48.0,
-      concessionsSubtotal: 9.50,
-      convenienceFee: 5.0,
-      discount: 2.50,
+      ticketSubtotal: 900.0,
+      concessionsSubtotal: 280.0,
+      convenienceFee: 70.0,
+      discount: 35.0,
       promoCodeApplied: 'MOVIE50',
-      totalAmount: 60.0,
+      totalAmount: 1215.0,
       paymentMethod: 'Credit Card (**** 4821)',
       paymentStatus: 'paid',
       bookedAt: new Date().toISOString(),
       customer: {
         name: 'Alex Morgan',
         email: 'alex.morgan@example.com',
-        phone: '+1 (555) 234-5678',
+        phone: '+91 98765 43210',
       },
       status: 'confirmed',
       qrValue: 'CINEVERSE-TICKET:CV-83921-DU|MOVIE:Dune Part Three|SEATS:B-7,B-8|TIME:Today 07:45 PM',
@@ -237,7 +285,8 @@ export default function App() {
 
   const handleSwitchToAdmin = () => {
     const adminUser = users.find((u) => u.role === 'admin') || INITIAL_USERS[0];
-    setCurrentUser(adminUser);
+    const updatedAdmin = { ...adminUser, name: 'Sai Waghmare' };
+    setCurrentUser(updatedAdmin);
     setActiveTab('admin');
   };
 
@@ -319,6 +368,33 @@ export default function App() {
           m.director.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : movies;
+
+  // Mobile QR Scan & Pay URL Detection (e.g. from Google Lens)
+  const [paySessionId, setPaySessionId] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('pay_session');
+    } catch {
+      return null;
+    }
+  });
+
+  // If opened via Google Lens or mobile scanner link, render dedicated mobile payment authorization view
+  if (paySessionId) {
+    return (
+      <MobilePaymentView
+        sessionId={paySessionId}
+        onClose={() => {
+          setPaySessionId(null);
+          try {
+            window.history.replaceState({}, '', window.location.pathname);
+          } catch {
+            // ignore
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-rose-600 selection:text-white">

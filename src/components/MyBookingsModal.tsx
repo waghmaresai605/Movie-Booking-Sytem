@@ -10,7 +10,8 @@ import {
   QrCode, 
   CheckCircle,
   AlertTriangle,
-  ChevronRight
+  ChevronRight,
+  Check
 } from 'lucide-react';
 import { Booking } from '../types';
 import { formatCurrency } from '../utils/bookingUtils';
@@ -32,6 +33,7 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
 }) => {
   const [selectedBookingForPass, setSelectedBookingForPass] = useState<Booking | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const [isSavedPdf, setIsSavedPdf] = useState(false);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
@@ -228,10 +230,15 @@ export const MyBookingsModal: React.FC<MyBookingsModalProps> = ({
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => printOrSaveTicket(selectedBookingForPass)}
-                  className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center justify-center gap-1.5"
+                  onClick={() => {
+                    printOrSaveTicket(selectedBookingForPass);
+                    setIsSavedPdf(true);
+                    setTimeout(() => setIsSavedPdf(false), 3000);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                 >
-                  <Printer className="w-4 h-4" /> Print Ticket
+                  {isSavedPdf ? <Check className="w-4 h-4 text-emerald-400" /> : <Printer className="w-4 h-4" />}
+                  <span>{isSavedPdf ? 'PDF Ticket Downloaded!' : 'Print / Save PDF Ticket'}</span>
                 </button>
               </div>
             </div>

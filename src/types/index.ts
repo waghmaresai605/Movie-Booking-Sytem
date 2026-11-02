@@ -155,3 +155,27 @@ export interface Booking {
   status: 'confirmed' | 'cancelled';
   qrValue: string;
 }
+
+export interface QRPaymentSession {
+  id: string;
+  movieTitle: string;
+  moviePoster: string;
+  movieBackdrop?: string;
+  theaterName: string;
+  hallName: string;
+  format: string;
+  showDate: string;
+  showTime: string;
+  seats: string[];
+  totalAmount: number;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  concessionsSummary?: string;
+  convenienceFee?: number;
+  createdAt: number;
+  expiresAt: number;
+  status: 'pending' | 'paid' | 'expired';
+  paidAt?: number;
+  paymentMethod?: string;
+}

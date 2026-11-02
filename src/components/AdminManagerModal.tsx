@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   X, 
   Film, 
-  DollarSign, 
+  IndianRupee, 
   Users, 
   TrendingUp, 
   Plus, 
@@ -228,7 +228,7 @@ export const AdminManagerModal: React.FC<AdminManagerModalProps> = ({
                 <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800">
                   <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
                     <span>Gross Box Office</span>
-                    <DollarSign className="w-4 h-4 text-emerald-400" />
+                    <IndianRupee className="w-4 h-4 text-emerald-400" />
                   </div>
                   <div className="text-2xl font-black text-white">{formatCurrency(totalRevenue)}</div>
                   <span className="text-[11px] text-emerald-400 font-medium">Real-time simulation</span>

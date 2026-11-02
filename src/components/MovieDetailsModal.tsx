@@ -266,7 +266,7 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
         <div className="p-4 sm:p-5 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-4">
           <div>
             <div className="text-xs text-slate-400">Standard & Premium formats available</div>
-            <div className="text-sm font-bold text-white">Tickets starting from $14.00</div>
+            <div className="text-sm font-bold text-white">Tickets starting from ₹200</div>
           </div>
           <button
             onClick={() => {

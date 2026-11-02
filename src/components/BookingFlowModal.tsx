@@ -19,8 +19,14 @@ import {
   Minus, 
   Tag, 
   AlertCircle,
-  QrCode
+  QrCode,
+  RefreshCw,
+  ExternalLink,
+  Smartphone,
+  CheckCircle2,
+  Zap
 } from 'lucide-react';
+import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
 import { 
   Movie, 
@@ -42,6 +48,7 @@ import {
 import { TicketQRCode } from './TicketQRCode';
 import { PROMO_CODES } from '../data/mockData';
 import { printOrSaveTicket } from '../utils/printUtils';
+import { MobilePaymentView } from './MobilePaymentView';
 
 interface BookingFlowModalProps {
   movie: Movie;
@@ -92,9 +99,33 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
   const [promoError, setPromoError] = useState('');
   const [customerName, setCustomerName] = useState(currentUser?.name || 'Alex Morgan');
   const [customerEmail, setCustomerEmail] = useState(currentUser?.email || 'alex.morgan@example.com');
-  const [customerPhone, setCustomerPhone] = useState(currentUser?.phone || '+1 (555) 234-5678');
+  const [customerPhone, setCustomerPhone] = useState(() => {
+    if (currentUser?.phone) {
+      if (currentUser.phone.startsWith('+1')) {
+        return '+91 98765 43210';
+      }
+      return currentUser.phone.startsWith('+91') ? currentUser.phone : `+91 ${currentUser.phone}`;
+    }
+    return '+91 98765 43210';
+  });
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi' | 'applepay'>('card');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // QR Code Payment Flow States (5-minute interactive scanner)
+  const [qrSessionId, setQrSessionId] = useState<string>('');
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [qrMode, setQrMode] = useState<'upi' | 'web'>('upi');
+  const [isPhoneSimulatorOpen, setIsPhoneSimulatorOpen] = useState<boolean>(false);
+  const [qrTimeLeft, setQrTimeLeft] = useState<number>(300); // 5 minutes in seconds
+  const [qrStatus, setQrStatus] = useState<'pending' | 'paid' | 'expired'>('pending');
+  const [isGeneratingQr, setIsGeneratingQr] = useState<boolean>(false);
+  const [mobileCheckoutUrl, setMobileCheckoutUrl] = useState<string>('');
+
+  const formatTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Step 5: Completed Booking
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
@@ -115,7 +146,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
     }, 0);
   }, [selectedConcessions, concessionsList]);
 
-  const convenienceFee = selectedSeatIds.length > 0 ? 2.5 * selectedSeatIds.length : 0;
+  const convenienceFee = selectedSeatIds.length > 0 ? 35.0 * selectedSeatIds.length : 0;
 
   const discountAmount = useMemo(() => {
     if (!appliedPromo) return 0;
@@ -184,8 +215,238 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
     }
   };
 
+  // Create / Refresh QR Payment Session
+  const createQrSession = async (modeOverride?: 'upi' | 'web') => {
+    if (!selectedShowtime) return;
+    setIsGeneratingQr(true);
+    setQrStatus('pending');
+    setQrTimeLeft(300); // 5 minutes
+
+    const theater = theaters.find((t) => t.id === selectedShowtime.theaterId) || theaters[0];
+    const newSessionId = `qrp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    setQrSessionId(newSessionId);
+
+    const concessionsSummary = Object.entries(selectedConcessions)
+      .map(([id, qty]) => {
+        const item = concessionsList.find((c) => c.id === id);
+        return item ? `${qty}x ${item.name}` : '';
+      })
+      .filter(Boolean)
+      .join(', ');
+
+    const payload = {
+      id: newSessionId,
+      movieTitle: movie.title,
+      moviePoster: movie.posterUrl,
+      movieBackdrop: movie.backdropUrl,
+      theaterName: theater.name,
+      hallName: selectedShowtime.hallName,
+      format: selectedShowtime.format,
+      showDate: selectedShowtime.date,
+      showTime: selectedShowtime.time,
+      seats: selectedSeatIds,
+      totalAmount: grandTotal,
+      customerName,
+      customerEmail,
+      customerPhone,
+      concessionsSummary,
+      convenienceFee,
+    };
+
+    // Standard Indian UPI Intent protocol (direct to Google Pay / PhonePe / Paytm / Lens)
+    const upiUri = `upi://pay?pa=cineverse.pay@icici&pn=CineVerse%20Cinemas&am=${grandTotal.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`CineVerse ${movie.title.substring(0, 15)} Seats ${selectedSeatIds.join(',')}`)}&tr=${newSessionId}`;
+
+    const origin = window.location.origin;
+    const searchParams = new URLSearchParams({
+      pay_session: newSessionId,
+      movie: movie.title,
+      total: grandTotal.toString(),
+      seats: selectedSeatIds.join(','),
+      time: selectedShowtime.time,
+      date: selectedShowtime.date,
+      poster: movie.posterUrl,
+      theater: theater.name,
+      hall: selectedShowtime.hallName,
+      format: selectedShowtime.format,
+      user: customerName
+    });
+    const urlTarget = `${origin}/?${searchParams.toString()}`;
+    setMobileCheckoutUrl(urlTarget);
+
+    const activeMode = modeOverride || qrMode;
+    const targetPayload = activeMode === 'upi' ? upiUri : urlTarget;
+
+    try {
+      const url = await QRCode.toDataURL(targetPayload, {
+        width: 320,
+        margin: 2,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff'
+        },
+        errorCorrectionLevel: 'M'
+      });
+      setQrDataUrl(url);
+    } catch (err) {
+      console.error('QR code generation error:', err);
+    }
+
+    try {
+      await fetch('/api/qr-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (err) {
+      console.warn('Backend QR session creation fallback:', err);
+    }
+
+    setIsGeneratingQr(false);
+  };
+
+  // Switch between Direct UPI intent and Web Screen QR code
+  const handleSwitchQrMode = async (newMode: 'upi' | 'web') => {
+    setQrMode(newMode);
+    if (!qrSessionId) {
+      createQrSession(newMode);
+      return;
+    }
+    const upiUri = `upi://pay?pa=cineverse.pay@icici&pn=CineVerse%20Cinemas&am=${grandTotal.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`CineVerse ${movie.title.substring(0, 15)} Seats ${selectedSeatIds.join(',')}`)}&tr=${qrSessionId}`;
+    const targetPayload = newMode === 'upi' ? upiUri : mobileCheckoutUrl;
+    try {
+      const url = await QRCode.toDataURL(targetPayload, {
+        width: 320,
+        margin: 2,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff'
+        },
+        errorCorrectionLevel: 'M'
+      });
+      setQrDataUrl(url);
+    } catch (err) {
+      console.error('Error switching QR mode:', err);
+    }
+  };
+
+  // Immediate Simulation of mobile scan & authorization
+  const handleSimulateMobilePayment = async () => {
+    if (!qrSessionId) return;
+    setIsProcessingPayment(true);
+    try {
+      await fetch(`/api/qr-session/${qrSessionId}/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentMethod: 'Google Pay (UPI Verified)' })
+      });
+      try {
+        localStorage.setItem(`cineverse_qr_paid_${qrSessionId}`, JSON.stringify({
+          id: qrSessionId,
+          paidAt: Date.now(),
+          method: 'Google Pay'
+        }));
+      } catch {
+        // ignore
+      }
+      setQrStatus('paid');
+      setIsPhoneSimulatorOpen(false);
+      handleProcessCheckout('Google Pay (UPI Verified)');
+    } catch (err) {
+      console.error('Simulate payment error:', err);
+      setQrStatus('paid');
+      setIsPhoneSimulatorOpen(false);
+      handleProcessCheckout('UPI / Mobile QR (Verified)');
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  // 1. Auto generate QR code when user enters Step 4 with UPI selected or switches to UPI
+  useEffect(() => {
+    if (currentStep === 4 && paymentMethod === 'upi') {
+      if (!qrSessionId || qrStatus === 'expired') {
+        createQrSession();
+      }
+    }
+  }, [currentStep, paymentMethod, grandTotal]);
+
+  // 2. 5-Minute countdown timer for the QR scanner
+  useEffect(() => {
+    if (currentStep !== 4 || paymentMethod !== 'upi' || qrStatus !== 'pending') return;
+
+    const timer = setInterval(() => {
+      setQrTimeLeft((prev) => {
+        if (prev <= 1) {
+          setQrStatus('expired');
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [currentStep, paymentMethod, qrStatus]);
+
+  // 3. Real-time synchronization when user scans from mobile Google Lens and clicks 'Pay'
+  useEffect(() => {
+    if (currentStep !== 4 || paymentMethod !== 'upi' || !qrSessionId || qrStatus !== 'pending') return;
+
+    // A. Poll server API every 1.5s
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/qr-session/${qrSessionId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.session && data.session.status === 'paid') {
+            setQrStatus('paid');
+            clearInterval(pollInterval);
+            handleProcessCheckout(data.session.paymentMethod || 'UPI / Mobile QR (Verified)');
+          } else if (data.session && data.session.status === 'expired') {
+            setQrStatus('expired');
+          }
+        }
+      } catch {
+        // ignore polling error
+      }
+    }, 1500);
+
+    // B. Storage event listener for multi-tab/cross-device fallback
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === `cineverse_qr_paid_${qrSessionId}`) {
+        setQrStatus('paid');
+        clearInterval(pollInterval);
+        handleProcessCheckout('UPI / Mobile QR (Verified)');
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // C. BroadcastChannel listener
+    let bc: BroadcastChannel | null = null;
+    if (typeof window.BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('cineverse_qr_payment_sync');
+        bc.onmessage = (event) => {
+          if (event.data?.sessionId === qrSessionId && event.data?.status === 'paid') {
+            setQrStatus('paid');
+            clearInterval(pollInterval);
+            handleProcessCheckout(event.data.method ? `${event.data.method} UPI` : 'UPI / Mobile QR (Verified)');
+          }
+        };
+      } catch {
+        // ignore
+      }
+    }
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('storage', handleStorage);
+      if (bc) bc.close();
+    };
+  }, [currentStep, paymentMethod, qrSessionId, qrStatus]);
+
   // Complete Payment & Confirm
-  const handleProcessCheckout = () => {
+  const handleProcessCheckout = (overrideMethod?: string) => {
     if (!selectedShowtime) return;
     if (selectedSeatIds.length === 0) {
       alert('Please select at least one seat to proceed.');
@@ -204,6 +465,14 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
         const item = concessionsList.find((c) => c.id === id)!;
         return { item, quantity: qty };
       });
+
+      const chosenPaymentMethod = overrideMethod || (
+        paymentMethod === 'card' 
+          ? 'Credit Card (**** 4821)' 
+          : paymentMethod === 'applepay' 
+          ? 'Apple Pay' 
+          : 'UPI / Mobile QR (Verified)'
+      );
 
       const newBooking: Booking = {
         id: `bk-${Date.now()}`,
@@ -232,7 +501,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
         discount: discountAmount,
         promoCodeApplied: appliedPromo || undefined,
         totalAmount: grandTotal,
-        paymentMethod: paymentMethod === 'card' ? 'Credit Card (**** 4821)' : paymentMethod === 'applepay' ? 'Apple Pay' : 'UPI Instant',
+        paymentMethod: chosenPaymentMethod,
         paymentStatus: 'paid',
         bookedAt: new Date().toISOString(),
         customer: {
@@ -262,9 +531,13 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
     }, 1400);
   };
 
+  const [isSavedPdf, setIsSavedPdf] = useState(false);
+
   const handlePrint = () => {
     if (confirmedBooking) {
       printOrSaveTicket(confirmedBooking);
+      setIsSavedPdf(true);
+      setTimeout(() => setIsSavedPdf(false), 3000);
     } else {
       window.print();
     }
@@ -405,7 +678,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                               <span className={`text-[10px] font-bold mt-0.5 ${isSelected ? 'text-rose-200' : 'text-sky-400'}`}>
                                 {show.format}
                               </span>
-                              <span className="text-[9px] text-slate-400 mt-0.5">From $14.00</span>
+                              <span className="text-[9px] text-slate-400 mt-0.5">From {formatCurrency(show.prices?.classic || 200)}</span>
                             </button>
                           );
                         })}
@@ -549,7 +822,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 rounded bg-amber-500/20 border border-amber-500/40" />
-                  <span className="text-amber-300 font-medium">VIP Recliner ($24)</span>
+                  <span className="text-amber-300 font-medium">VIP Recliner ({formatCurrency(selectedShowtime.prices?.vip || 450)})</span>
                 </div>
               </div>
             </div>
@@ -735,13 +1008,31 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                       </div>
                       <div>
                         <label className="text-xs text-slate-400 font-medium block mb-1">Mobile Phone (SMS updates)</label>
-                        <input
-                          type="tel"
-                          value={customerPhone}
-                          onChange={(e) => setCustomerPhone(e.target.value)}
-                          required
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none"
-                        />
+                        <div className="relative flex items-center">
+                          <div className="absolute left-0 inset-y-0 pl-3 flex items-center pointer-events-none">
+                            <span className="text-xs font-semibold text-slate-300 flex items-center gap-1 select-none">
+                              <span className="text-sm">🇮🇳</span> +91
+                            </span>
+                            <span className="mx-2 h-4 w-px bg-slate-800" />
+                          </div>
+                          <input
+                            type="tel"
+                            value={customerPhone.replace(/^\+91\s*/, '')}
+                            onChange={(e) => {
+                              let val = e.target.value;
+                              if (val.startsWith('+91')) {
+                                val = val.replace(/^\+91\s*/, '');
+                              } else if (val.startsWith('91') && val.length > 10) {
+                                val = val.slice(2);
+                              }
+                              const digitsOnly = val.replace(/[^\d\s-]/g, '');
+                              setCustomerPhone(`+91 ${digitsOnly}`);
+                            }}
+                            placeholder="98765 43210"
+                            required
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl pl-20 pr-3.5 py-2.5 text-xs text-white outline-none font-medium tracking-wide"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -859,6 +1150,269 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                       </div>
                     </div>
                   )}
+
+                  {paymentMethod === 'applepay' && (
+                    <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                          <Sparkles className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-white">Apple Pay & Google Pay Express</h4>
+                          <p className="text-[11px] text-slate-400">Touch ID, Face ID or GPay UPI wallet quick authorization</p>
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-center justify-between">
+                        <span>Connected device pass:</span>
+                        <span className="font-mono text-emerald-400 font-bold">READY TO CHARGE</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {paymentMethod === 'upi' && (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-4 shadow-xl">
+                      {/* Top Bar with Timer */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400">
+                            <QrCode className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <span>UPI QR Code Scanner</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                                Live Scanner
+                              </span>
+                            </h4>
+                            <p className="text-[10px] text-slate-400">Scan with Google Lens, GPay, PhonePe or Paytm</p>
+                          </div>
+                        </div>
+
+                        {/* 5-minute countdown timer */}
+                        <div className="text-right">
+                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border font-mono ${
+                            qrTimeLeft <= 60 
+                              ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse'
+                              : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                          }`}>
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>{formatTimer(qrTimeLeft)}</span>
+                          </div>
+                          <span className="block text-[9px] text-slate-500 mt-0.5">5 min time limit</span>
+                        </div>
+                      </div>
+
+                      {/* Visual Timer Progress Bar */}
+                      <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-1000 ${
+                            qrTimeLeft <= 60 ? 'bg-rose-500' : qrTimeLeft <= 150 ? 'bg-amber-500' : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.max(0, (qrTimeLeft / 300) * 100)}%` }}
+                        />
+                      </div>
+
+                      {/* Mode Switcher: Direct UPI (No 403) vs Mobile Web View */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 p-1 bg-slate-900/90 rounded-xl border border-slate-800">
+                        <div className="flex items-center gap-1 w-full sm:w-auto">
+                          <button
+                            type="button"
+                            onClick={() => handleSwitchQrMode('upi')}
+                            className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              qrMode === 'upi'
+                                ? 'bg-rose-600 text-white shadow-md shadow-rose-950'
+                                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                            }`}
+                          >
+                            <Zap className="w-3.5 h-3.5 text-amber-300" />
+                            <span>UPI Apps & Lens</span>
+                            <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">
+                              No 403
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSwitchQrMode('web')}
+                            className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              qrMode === 'web'
+                                ? 'bg-rose-600 text-white shadow-md shadow-rose-950'
+                                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                            }`}
+                          >
+                            <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
+                            <span>Mobile Web View</span>
+                          </button>
+                        </div>
+
+                        <span className="text-[10px] text-slate-400 text-center sm:text-right px-2">
+                          {qrMode === 'upi' 
+                            ? 'Scans directly into UPI Apps (Google Pay, PhonePe, Paytm)' 
+                            : 'Shows web order details with interactive Pay button'}
+                        </span>
+                      </div>
+
+                      {/* Explanation regarding 403 on phone browser */}
+                      {qrMode === 'upi' ? (
+                        <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-600/30 text-[11px] text-emerald-300 flex items-start gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-white">Google Lens & UPI Direct Mode Active:</span>
+                            <p className="text-[10px] text-emerald-300/90 mt-0.5">
+                              Scanning this QR code with Google Lens or your phone camera directly prompts to launch Google Pay, PhonePe, or Paytm with ₹{grandTotal.toFixed(2)}. It does not open a web page, bypassing Google account 403 errors entirely.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-600/30 text-[11px] text-amber-300 flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-white">Mobile Web View Notice:</span>
+                            <p className="text-[10px] text-amber-200/90 mt-0.5">
+                              If an external smartphone scans this URL without active Google AI Studio session cookies, Google displays a 403 Forbidden page. To test the mobile screen with the &quot;Pay&quot; button, use the <strong>Phone Simulator</strong> button below or open in a new tab.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* QR Display + Booking Summary details */}
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
+                        {/* QR Code Container */}
+                        <div className="sm:col-span-6 flex flex-col items-center">
+                          <div className="relative p-2.5 bg-white rounded-2xl shadow-xl border-4 border-slate-800">
+                            {isGeneratingQr ? (
+                              <div className="w-44 h-44 sm:w-48 sm:h-48 flex flex-col items-center justify-center gap-2 text-slate-800">
+                                <div className="w-7 h-7 border-3 border-rose-600 border-t-transparent rounded-full animate-spin" />
+                                <span className="text-[10px] font-bold">Creating Secure QR...</span>
+                              </div>
+                            ) : qrDataUrl ? (
+                              <img
+                                src={qrDataUrl}
+                                alt="UPI Dynamic Payment QR Code"
+                                className={`w-44 h-44 sm:w-48 sm:h-48 object-contain transition-all ${
+                                  qrStatus === 'expired' ? 'filter blur-sm opacity-25' : ''
+                                }`}
+                              />
+                            ) : (
+                              <div className="w-44 h-44 sm:w-48 sm:h-48 flex items-center justify-center text-slate-500 text-xs">
+                                Generating QR...
+                              </div>
+                            )}
+
+                            {/* Expired Overlay with New Scanner Button */}
+                            {qrStatus === 'expired' && (
+                              <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xs rounded-xl flex flex-col items-center justify-center p-3 text-center space-y-2">
+                                <AlertCircle className="w-8 h-8 text-rose-500 animate-bounce" />
+                                <p className="text-[11px] font-black text-white leading-tight">
+                                  5-Minute Time Limit Over
+                                </p>
+                                <p className="text-[9px] text-slate-400">
+                                  Scanner expired. Generate a new QR code to proceed.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => createQrSession()}
+                                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-lg shadow-rose-950 cursor-pointer"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Generate New Scanner</span>
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Paid Overlay */}
+                            {qrStatus === 'paid' && (
+                              <div className="absolute inset-0 bg-slate-950/90 rounded-xl flex flex-col items-center justify-center p-3 text-center space-y-2">
+                                <CheckCircle2 className="w-10 h-10 text-emerald-400 animate-pulse" />
+                                <p className="text-xs font-bold text-emerald-400">Payment Authorized!</p>
+                                <span className="text-[10px] text-slate-300">Issuing Tickets...</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 mt-2.5 text-[10px] text-slate-400">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                            <span>Listening for mobile authorization...</span>
+                          </div>
+                        </div>
+
+                        {/* Booking Summary Info attached to QR Code */}
+                        <div className="sm:col-span-6 space-y-2.5 text-xs bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-slate-500 block">Show & Movie</span>
+                            <strong className="text-white font-bold block truncate">{movie.title}</strong>
+                            <span className="text-[10px] text-rose-400 font-semibold">{selectedShowtime.format}</span>
+                          </div>
+
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-slate-500 block">Theater & Hall</span>
+                            <span className="text-slate-300 block truncate text-[11px]">{selectedShowtime.hallName}</span>
+                            <span className="text-amber-400 font-medium text-[11px] block">{selectedShowtime.date} • {selectedShowtime.time}</span>
+                          </div>
+
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-slate-500 block">Reserved Seats</span>
+                            <span className="text-emerald-400 font-mono font-bold text-xs">{selectedSeatIds.join(', ')}</span>
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                            <span className="text-[10px] uppercase font-bold text-slate-400">Amount to Pay:</span>
+                            <span className="text-base font-black text-rose-400">{formatCurrency(grandTotal)}</span>
+                          </div>
+
+                          {/* Instant Test Buttons for College Presentation / Evaluation */}
+                          <div className="pt-2 border-t border-slate-800/80 flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setIsPhoneSimulatorOpen(true)}
+                              className="w-full py-2 px-3 rounded-lg bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/40 text-[11px] font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                            >
+                              <Smartphone className="w-3.5 h-3.5" />
+                              <span>Open Phone Simulator (Test Pay Button)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSimulateMobilePayment}
+                              disabled={isProcessingPayment || qrStatus === 'paid' || qrStatus === 'expired'}
+                              className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-md shadow-emerald-950"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              <span>{isProcessingPayment ? 'Authorizing...' : '⚡ 1-Click Mobile Payment Test'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Supported Apps List & Quick Test Link */}
+                      <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
+                        <div className="flex items-center gap-1.5">
+                          <Smartphone className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Google Lens / Camera / GPay / PhonePe / Paytm</span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => createQrSession()}
+                            className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1 underline cursor-pointer"
+                            title="Restart 5-minute timer with fresh QR"
+                          >
+                            <RefreshCw className="w-3 h-3" /> Refresh QR
+                          </button>
+                          {mobileCheckoutUrl && (
+                            <a
+                              href={mobileCheckoutUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1 hover:underline"
+                            >
+                              <span>Open in New Tab</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -912,15 +1466,26 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
 
                   {/* Pay button */}
                   <button
-                    onClick={handleProcessCheckout}
+                    onClick={() => {
+                      if (paymentMethod === 'upi' && qrStatus === 'expired') {
+                        createQrSession();
+                        return;
+                      }
+                      handleProcessCheckout();
+                    }}
                     disabled={isProcessingPayment}
-                    className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-extrabold text-sm shadow-xl shadow-rose-900/50 flex items-center justify-center gap-2 cursor-pointer transition-transform active:scale-95"
+                    className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-extrabold text-sm shadow-xl shadow-rose-900/50 flex items-center justify-center gap-2 cursor-pointer transition-transform active:scale-95 disabled:opacity-50"
                   >
                     {isProcessingPayment ? (
                       <div className="flex items-center gap-2">
                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         <span>Securing Your Tickets...</span>
                       </div>
+                    ) : paymentMethod === 'upi' && qrStatus === 'expired' ? (
+                      <>
+                        <RefreshCw className="w-4 h-4" />
+                        <span>QR Expired • Click to Refresh Scanner</span>
+                      </>
                     ) : (
                       <>
                         <ShieldCheck className="w-4 h-4" />
@@ -1035,17 +1600,48 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
             <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
               <button
                 onClick={handlePrint}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold transition-colors"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold transition-colors cursor-pointer"
               >
-                <Printer className="w-4 h-4" />
-                <span>Print / Save PDF Ticket</span>
+                {isSavedPdf ? <Check className="w-4 h-4 text-emerald-400" /> : <Printer className="w-4 h-4" />}
+                <span>{isSavedPdf ? 'PDF Ticket Downloaded!' : 'Print / Save PDF Ticket'}</span>
               </button>
               <button
                 onClick={onClose}
-                className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all shadow-lg shadow-rose-900/40"
+                className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all shadow-lg shadow-rose-900/40 cursor-pointer"
               >
                 Done
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Interactive Mobile Phone Simulator Modal */}
+        {isPhoneSimulatorOpen && qrSessionId && (
+          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-fadeIn">
+            <div className="relative w-full max-w-sm bg-slate-950 rounded-[2.5rem] border-4 border-slate-700 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col ring-1 ring-white/10">
+              {/* Phone Top Bar */}
+              <div className="flex items-center justify-between px-5 py-3 bg-slate-900 border-b border-slate-800 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="font-extrabold text-white text-[11px] tracking-wide">Mobile Scanner Simulation</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPhoneSimulatorOpen(false)}
+                  className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                  title="Close Phone Simulator"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Render MobilePaymentView */}
+              <div className="overflow-y-auto flex-1">
+                <MobilePaymentView
+                  sessionId={qrSessionId}
+                  onClose={() => setIsPhoneSimulatorOpen(false)}
+                />
+              </div>
             </div>
           </div>
         )}
